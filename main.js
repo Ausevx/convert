@@ -302,7 +302,11 @@ window.convertSelection = async function () {
     showPopup("<h2>Finding conversion route...</h2>");
 
     const output = await buildConvertPath(inputFileData, outputOption, [[inputOption]]);
-    if (!output) return alert("Failed to find conversion route.");
+    if (!output) {
+      hidePopup();
+      alert("Failed to find conversion route.");
+      return;
+    }
 
     const outputFormat = outputOption.format;
 
