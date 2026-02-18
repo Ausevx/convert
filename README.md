@@ -9,6 +9,17 @@ This is not just terrible for privacy, it's also incredibly lame. What if you _r
 
 For a semi-technical overview of this tool, check out the video: https://youtu.be/btUbcsTbVA8
 
+## Enhanced Features
+
+This fork adds several new capabilities:
+
+- **Batch File Upload** — Select or drag-and-drop multiple files at once. Files appear in a visual list where you can review and remove individual items before converting
+- **Image-to-PDF Merge** — When 2+ image files (JPEG, PNG, WebP) are selected, a "Merge images into single PDF" toggle appears. Enable it to combine all images into one multi-page PDF
+- **Per-File Output Format** — Switch between "Same for all" and "Individual" output modes. In Individual mode, each file gets its own output format picker via a centered modal overlay
+- **Progress Bar with Cancel** — A shimmer-animated progress bar shows real-time completion percentage and current file status during conversion. A Cancel button lets you abort mid-conversion while keeping already-converted files
+- **Chrome Download Fix** — Output files now have proper names (e.g., `photo.png` instead of UUIDs) and download correctly on Chrome
+- **Dark Theme UI** — Modern dark interface with improved typography, responsive layout, and mobile-optimized bottom sheets
+
 ## Usage
 
 1. Go to [convert.to.it](https://convert.to.it/)

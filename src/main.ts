@@ -3,8 +3,14 @@ import normalizeMimeType from "./normalizeMimeType.js";
 import handlers from "./handlers";
 import { TraversionGraph } from "./TraversionGraph.js";
 
+/** A single file in the batch with optional per-file output override */
+interface BatchFile {
+  file: File;
+  outputFormatIndex: number | null; // null = use global selection
+}
+
 /** Files currently selected for conversion */
-let selectedFiles: File[] = [];
+let batchFiles: BatchFile[] = [];
 /**
  * Whether to use "simple" mode.
  * - In **simple** mode, the input/output lists are grouped by file format.
@@ -13,12 +19,18 @@ let selectedFiles: File[] = [];
  */
 let simpleMode: boolean = true;
 
+/** Whether to merge images into a single PDF */
+let mergeMode: boolean = false;
+
+/** Whether to use individual per-file output format selection */
+let individualMode: boolean = false;
+
 /** Handlers that support conversion from any formats. */
 const conversionsFromAnyInput: ConvertPathNode[] = handlers
-.filter(h => h.supportAnyInput && h.supportedFormats)
-.flatMap(h => h.supportedFormats!
-  .filter(f => f.to)
-  .map(f => ({ handler: h, format: f})))
+  .filter(h => h.supportAnyInput && h.supportedFormats)
+  .flatMap(h => h.supportedFormats!
+    .filter(f => f.to)
+    .map(f => ({ handler: h, format: f })))
 
 const ui = {
   fileInput: document.querySelector("#file-input") as HTMLInputElement,
@@ -30,11 +42,18 @@ const ui = {
   inputSearch: document.querySelector("#search-from") as HTMLInputElement,
   outputSearch: document.querySelector("#search-to") as HTMLInputElement,
   popupBox: document.querySelector("#popup") as HTMLDivElement,
-  popupBackground: document.querySelector("#popup-bg") as HTMLDivElement
+  popupBackground: document.querySelector("#popup-bg") as HTMLDivElement,
+  batchPanel: document.querySelector("#batch-panel") as HTMLDivElement,
+  batchFileList: document.querySelector("#batch-file-list") as HTMLDivElement,
+  batchTitle: document.querySelector("#batch-title") as HTMLHeadingElement,
+  batchClear: document.querySelector("#batch-clear") as HTMLButtonElement,
+  mergeToggle: document.querySelector("#merge-toggle") as HTMLInputElement,
+  mergeLabel: document.querySelector("#merge-label") as HTMLLabelElement,
+  outputModeToggle: document.querySelector("#output-mode-toggle") as HTMLDivElement,
 };
 
 /**
- * Filters a list of butttons to exclude those not matching a substring.
+ * Filters a list of buttons to exclude those not matching a substring.
  * @param list Button list (div) to filter.
  * @param string Substring for which to search.
  */
@@ -44,8 +63,8 @@ const filterButtonList = (list: HTMLDivElement, string: string) => {
     const formatIndex = button.getAttribute("format-index");
     let hasExtension = false;
     if (formatIndex) {
-      const format = allOptions[parseInt(formatIndex)];
-      hasExtension = format?.format.extension.toLowerCase().includes(string);
+      const format = allOptions[parseInt(formatIndex)]?.format;
+      hasExtension = format?.extension.toLowerCase().includes(string);
     }
     const hasText = button.textContent.toLowerCase().includes(string);
     if (!hasExtension && !hasText) {
@@ -80,6 +99,245 @@ ui.fileSelectArea.onclick = () => {
   ui.fileInput.click();
 };
 
+/** Format human-readable file sizes */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/** Check if a MIME type is an image type we can merge */
+function isImageType(mime: string): boolean {
+  return ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'].includes(mime);
+}
+
+/** Get output format display label for a per-file override */
+function getFormatLabel(formatIndex: number | null): string {
+  if (formatIndex === null) return 'Global';
+  const opt = allOptions[formatIndex];
+  return opt ? opt.format.format.toUpperCase() : 'Global';
+}
+
+/** Close any open per-file format popover + backdrop */
+function closeAllPopovers() {
+  document.querySelectorAll('.perfile-popover').forEach(el => el.remove());
+  document.querySelectorAll('.perfile-backdrop').forEach(el => el.remove());
+}
+
+/** Render the batch file list UI */
+function renderBatchFileList() {
+  closeAllPopovers();
+
+  if (batchFiles.length === 0) {
+    ui.batchPanel.style.display = 'none';
+    ui.fileSelectArea.innerHTML = `
+      <div class="file-area-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+      <h2>Drop your files here</h2>
+      <p id="drop-hint-text">or <span class="underline-link">browse</span> to choose</p>`;
+    return;
+  }
+
+  ui.batchPanel.style.display = '';
+  ui.batchTitle.textContent = `Selected Files (${batchFiles.length})`;
+
+  // Show merge toggle only when ≥2 image files present
+  const imageCount = batchFiles.filter(bf => isImageType(bf.file.type)).length;
+  ui.mergeLabel.style.display = imageCount >= 2 ? '' : 'none';
+  if (imageCount < 2) {
+    mergeMode = false;
+    ui.mergeToggle.checked = false;
+  }
+
+  // Update file area
+  ui.fileSelectArea.innerHTML = `
+    <div class="file-area-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+    <h2>${batchFiles.length} file${batchFiles.length > 1 ? 's' : ''} selected</h2>
+    <p id="drop-hint-text">click to add more</p>`;
+
+  // Render file rows
+  ui.batchFileList.innerHTML = '';
+  batchFiles.forEach((bf, idx) => {
+    const row = document.createElement('div');
+    row.className = 'batch-file-row';
+    row.style.animationDelay = `${idx * 30}ms`;
+
+    row.innerHTML = `
+      <span class="batch-file-index">${idx + 1}</span>
+      <span class="batch-file-name" title="${bf.file.name}">${bf.file.name}</span>
+      <span class="batch-file-type">${bf.file.type || 'unknown'}</span>
+      <span class="batch-file-size">${formatFileSize(bf.file.size)}</span>
+    `;
+
+    // Per-file output format badge (only in individual mode)
+    if (individualMode) {
+      const formatBadge = document.createElement('button');
+      formatBadge.className = 'perfile-format-badge' + (bf.outputFormatIndex !== null ? ' perfile-set' : '');
+      formatBadge.textContent = bf.outputFormatIndex !== null
+        ? '\u2192 ' + getFormatLabel(bf.outputFormatIndex)
+        : '\u2192 Choose format';
+      formatBadge.title = bf.outputFormatIndex !== null
+        ? `Output: ${getFormatLabel(bf.outputFormatIndex)} (click to change)`
+        : 'Click to choose output format for this file';
+      formatBadge.onclick = (e) => {
+        e.stopPropagation();
+        openPerFileFormatPicker(idx);
+      };
+      row.appendChild(formatBadge);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'batch-file-remove';
+    removeBtn.textContent = '\u2715';
+    removeBtn.title = 'Remove file';
+    removeBtn.onclick = (e) => {
+      e.stopPropagation();
+      batchFiles.splice(idx, 1);
+      renderBatchFileList();
+      updateConvertButtonState();
+    };
+    row.appendChild(removeBtn);
+
+    ui.batchFileList.appendChild(row);
+  });
+}
+
+/** Open a fixed modal format picker for a given batch file */
+function openPerFileFormatPicker(fileIdx: number) {
+  closeAllPopovers();
+
+  // Backdrop
+  const backdrop = document.createElement('div');
+  backdrop.className = 'perfile-backdrop';
+  backdrop.onclick = () => closeAllPopovers();
+  document.body.appendChild(backdrop);
+
+  // Modal
+  const popover = document.createElement('div');
+  popover.className = 'perfile-popover';
+
+  // Header with title and close button
+  const header = document.createElement('div');
+  header.className = 'perfile-popover-header';
+
+  const title = document.createElement('div');
+  title.className = 'perfile-popover-title';
+  title.textContent = `Output format for: ${batchFiles[fileIdx].file.name}`;
+  header.appendChild(title);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'perfile-popover-close';
+  closeBtn.textContent = '\u2715';
+  closeBtn.onclick = () => closeAllPopovers();
+  header.appendChild(closeBtn);
+
+  popover.appendChild(header);
+
+  // Search input
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Search formats\u2026';
+  searchInput.className = 'perfile-search';
+  popover.appendChild(searchInput);
+
+  // "Use global" reset option
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'perfile-option perfile-option-reset';
+  resetBtn.textContent = '\u21a9 Remove override (use global)';
+  resetBtn.onclick = (e) => {
+    e.stopPropagation();
+    batchFiles[fileIdx].outputFormatIndex = null;
+    closeAllPopovers();
+    renderBatchFileList();
+    updateConvertButtonState();
+  };
+  popover.appendChild(resetBtn);
+
+  // Format options list
+  const optionList = document.createElement('div');
+  optionList.className = 'perfile-options';
+
+  const outputFormats: { index: number; label: string; ext: string; mime: string }[] = [];
+  const seenMimes = new Set<string>();
+
+  for (let i = 0; i < allOptions.length; i++) {
+    const opt = allOptions[i];
+    if (!opt.format.to || !opt.format.mime) continue;
+    const key = simpleMode ? `${opt.format.mime}|${opt.format.format}` : `${opt.format.mime}|${opt.format.format}|${opt.handler.name}`;
+    if (seenMimes.has(key)) continue;
+    seenMimes.add(key);
+    const ext = opt.format.format.toUpperCase();
+    const label = simpleMode
+      ? `${ext} \u2014 ${opt.format.name.split('(').join(')').split(')').filter((_, j) => j % 2 === 0).filter(c => c !== '').join(' ')} (${opt.format.mime})`
+      : `${ext} \u2014 ${opt.format.name} (${opt.format.mime})`;
+    outputFormats.push({ index: i, label, ext, mime: opt.format.mime });
+  }
+
+  for (const fmt of outputFormats) {
+    const btn = document.createElement('button');
+    btn.className = 'perfile-option';
+    if (batchFiles[fileIdx].outputFormatIndex === fmt.index) {
+      btn.classList.add('perfile-option-selected');
+    }
+    btn.textContent = fmt.label;
+    btn.dataset.search = fmt.label.toLowerCase();
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      batchFiles[fileIdx].outputFormatIndex = fmt.index;
+      closeAllPopovers();
+      renderBatchFileList();
+      updateConvertButtonState();
+    };
+    optionList.appendChild(btn);
+  }
+  popover.appendChild(optionList);
+
+  // Search filtering
+  searchInput.oninput = () => {
+    const q = searchInput.value.toLowerCase();
+    for (const child of Array.from(optionList.children)) {
+      const el = child as HTMLElement;
+      el.style.display = (el.dataset.search || '').includes(q) ? '' : 'none';
+    }
+  };
+
+  // Append to body (fixed position, never clipped)
+  document.body.appendChild(popover);
+
+  // Focus search
+  requestAnimationFrame(() => searchInput.focus());
+}
+
+/** Update convert button enabled/disabled state */
+function updateConvertButtonState() {
+  if (batchFiles.length === 0) {
+    ui.convertButton.className = 'disabled';
+    return;
+  }
+
+  if (mergeMode && batchFiles.length >= 2) {
+    const outputSelected = document.querySelector("#to-list .selected");
+    ui.convertButton.className = outputSelected ? '' : 'disabled';
+    return;
+  }
+
+  // Input format must be selected
+  const inputSelected = document.querySelector("#from-list .selected");
+  if (!inputSelected) {
+    ui.convertButton.className = 'disabled';
+    return;
+  }
+
+  if (individualMode) {
+    // In individual mode: every file must have a per-file override set
+    const allHavePerFile = batchFiles.every(bf => bf.outputFormatIndex !== null);
+    ui.convertButton.className = allHavePerFile ? '' : 'disabled';
+  } else {
+    // In global mode: global output must be selected
+    const globalOutputSelected = document.querySelector("#to-list .selected");
+    ui.convertButton.className = globalOutputSelected ? '' : 'disabled';
+  }
+}
+
 /**
  * Validates and stores user selected files. Works for both manual
  * selection and file drag-and-drop.
@@ -102,22 +360,22 @@ const fileSelectHandler = (event: Event) => {
   }
 
   if (!inputFiles) return;
-  const files = Array.from(inputFiles);
-  if (files.length === 0) return;
+  const newFiles = Array.from(inputFiles);
+  if (newFiles.length === 0) return;
 
-  if (files.some(c => c.type !== files[0].type)) {
-    return alert("All input files must be of the same type.");
+  // Add new files to existing batch (don't replace)
+  for (const f of newFiles) {
+    batchFiles.push({ file: f, outputFormatIndex: null });
   }
-  files.sort((a, b) => a.name === b.name ? 0 : (a.name < b.name ? -1 : 1));
-  selectedFiles = files;
 
-  ui.fileSelectArea.innerHTML = `<h2>
-    ${files[0].name}
-    ${files.length > 1 ? `<br>... and ${files.length - 1} more` : ""}
-  </h2>`;
+  // Sort by name
+  batchFiles.sort((a, b) => a.file.name === b.file.name ? 0 : (a.file.name < b.file.name ? -1 : 1));
 
-  // Common MIME type adjustments (to match "mime" library)
-  let mimeType = normalizeMimeType(files[0].type);
+  renderBatchFileList();
+
+  // Auto-detect input format from the first file's MIME type
+  const firstFile = batchFiles[0].file;
+  let mimeType = normalizeMimeType(firstFile.type);
 
   // Find a button matching the input MIME type.
   const buttonMimeType = Array.from(ui.inputList.children).find(button => {
@@ -133,7 +391,7 @@ const fileSelectHandler = (event: Event) => {
   }
 
   // Fall back to matching format by file extension if MIME type wasn't found.
-  const fileExtension = files[0].name.split(".").pop()?.toLowerCase();
+  const fileExtension = firstFile.name.split(".").pop()?.toLowerCase();
 
   const buttonExtension = Array.from(ui.inputList.children).find(button => {
     if (!(button instanceof HTMLButtonElement)) return false;
@@ -150,15 +408,66 @@ const fileSelectHandler = (event: Event) => {
   }
 
   filterButtonList(ui.inputList, ui.inputSearch.value);
-
 };
 
 // Add the file selection handler to both the file input element and to
 // the window as a drag-and-drop event, and to the clipboard paste event.
 ui.fileInput.addEventListener("change", fileSelectHandler);
-window.addEventListener("drop", fileSelectHandler);
-window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", (e) => {
+  ui.fileSelectArea.classList.remove('drag-over');
+  fileSelectHandler(e);
+});
+window.addEventListener("dragover", e => {
+  e.preventDefault();
+  ui.fileSelectArea.classList.add('drag-over');
+});
+window.addEventListener("dragleave", (e) => {
+  // Only remove if leaving the window
+  if (e.relatedTarget === null) {
+    ui.fileSelectArea.classList.remove('drag-over');
+  }
+});
 window.addEventListener("paste", fileSelectHandler);
+
+// Batch clear button
+ui.batchClear.addEventListener("click", () => {
+  batchFiles = [];
+  renderBatchFileList();
+  updateConvertButtonState();
+  ui.fileInput.value = ''; // Reset file input
+});
+
+// Merge toggle
+ui.mergeToggle.addEventListener("change", () => {
+  mergeMode = ui.mergeToggle.checked;
+  updateConvertButtonState();
+});
+
+// Output mode toggle (Same for all / Individual)
+ui.outputModeToggle.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.classList.contains('output-mode-btn')) return;
+  const mode = target.dataset.mode;
+  if (!mode) return;
+
+  // Update active state on buttons
+  for (const btn of Array.from(ui.outputModeToggle.children)) {
+    btn.classList.remove('active');
+  }
+  target.classList.add('active');
+
+  individualMode = mode === 'individual';
+
+  // When switching back to global, clear per-file overrides
+  if (!individualMode) {
+    for (const bf of batchFiles) {
+      bf.outputFormatIndex = null;
+    }
+  }
+
+  renderBatchFileList();
+  updateConvertButtonState();
+});
 
 /**
  * Display an on-screen popup.
@@ -191,7 +500,7 @@ window.printSupportedFormatCache = () => {
 }
 
 
-async function buildOptionList () {
+async function buildOptionList() {
 
   allOptions.length = 0;
   ui.inputList.innerHTML = "";
@@ -256,12 +565,7 @@ async function buildOptionList () {
         const previous = targetParent?.getElementsByClassName("selected")?.[0];
         if (previous) previous.className = "";
         event.target.className = "selected";
-        const allSelected = document.getElementsByClassName("selected");
-        if (allSelected.length === 2) {
-          ui.convertButton.className = "";
-        } else {
-          ui.convertButton.className = "disabled";
-        }
+        updateConvertButtonState();
       };
 
       if (format.from && addToInputs) {
@@ -312,12 +616,19 @@ ui.modeToggleButton.addEventListener("click", () => {
   buildOptionList();
 });
 
-async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
+async function attemptConvertPath(files: FileData[], path: ConvertPathNode[]) {
 
-  ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
-    <p>Trying <b>${path.map(c => c.format.format).join(" → ")}</b>...</p>`;
+  // Update status text if inside progress popup; otherwise update popup directly
+  const statusEl = document.getElementById('batch-status');
+  const routeLabel = path.map(c => c.format.format).join(" → ");
+  if (statusEl) {
+    statusEl.textContent = `Finding route: ${routeLabel}`;
+  } else {
+    ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
+      <p>Trying <b>${routeLabel}</b>...</p>`;
+  }
 
-  for (let i = 0; i < path.length - 1; i ++) {
+  for (let i = 0; i < path.length - 1; i++) {
     const handler = path[i + 1].handler;
     try {
       let supportedFormats = window.supportedFormatCache.get(handler.name);
@@ -341,8 +652,12 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
     } catch (e) {
       console.log(path.map(c => c.format.format));
       console.error(handler.name, `${path[i].format.format} → ${path[i + 1].format.format}`, e);
-      ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
-        <p>Looking for a valid path...</p>`;
+      if (statusEl) {
+        statusEl.textContent = 'Looking for valid path...';
+      } else {
+        ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
+          <p>Looking for a valid path...</p>`;
+      }
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       return null;
     }
@@ -352,7 +667,7 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
 
 }
 
-async function tryConvertByTraversing (
+async function tryConvertByTraversing(
   files: FileData[],
   from: ConvertPathNode,
   to: ConvertPathNode
@@ -368,65 +683,278 @@ async function tryConvertByTraversing (
   return null;
 }
 
-function downloadFile (bytes: Uint8Array, name: string, mime: string) {
+function downloadFile(bytes: Uint8Array, name: string, mime: string) {
   const blob = new Blob([bytes as BlobPart], { type: mime });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = name;
+  // Chrome requires the link to be in the DOM for download attribute to work
+  link.style.display = 'none';
+  document.body.appendChild(link);
   link.click();
+  // Clean up after a tick
+  setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  }, 100);
+}
+
+/** Build a proper output filename: original name + output extension */
+function buildOutputFilename(originalName: string, outputExtension: string): string {
+  const dotIdx = originalName.lastIndexOf('.');
+  const baseName = dotIdx > 0 ? originalName.substring(0, dotIdx) : originalName;
+  return `${baseName}.${outputExtension.toLowerCase()}`;
+}
+
+/** Flag to cancel an in-progress conversion */
+let conversionCancelled = false;
+
+/** Build the progress popup HTML with percentage, progress bar, status text, and cancel button */
+function buildProgressPopup(title: string): {
+  updateProgress: (completed: number, total: number, statusText: string) => void;
+  finish: () => void;
+} {
+  conversionCancelled = false;
+
+  window.showPopup(
+    `<h2>${title}</h2>` +
+    `<div class="popup-progress-section">` +
+    `<div class="popup-progress-header">` +
+    `<span id="batch-status" class="popup-status">Preparing...</span>` +
+    `<span id="batch-percent" class="popup-progress-percent">0%</span>` +
+    `</div>` +
+    `<div class="popup-progress"><div class="popup-progress-bar" id="batch-progress" style="width: 0%"></div></div>` +
+    `</div>` +
+    `<button class="popup-cancel-btn" id="cancel-convert">Cancel</button>`
+  );
+
+  const cancelBtn = document.getElementById('cancel-convert');
+  if (cancelBtn) {
+    cancelBtn.onclick = () => {
+      conversionCancelled = true;
+      cancelBtn.textContent = 'Cancelling...';
+      (cancelBtn as HTMLButtonElement).disabled = true;
+    };
+  }
+
+  return {
+    updateProgress(completed: number, total: number, statusText: string) {
+      const pct = Math.round((completed / total) * 100);
+      const bar = document.getElementById('batch-progress');
+      const percentEl = document.getElementById('batch-percent');
+      const statusEl = document.getElementById('batch-status');
+      if (bar) bar.style.width = `${pct}%`;
+      if (percentEl) percentEl.textContent = `${pct}%`;
+      if (statusEl) statusEl.textContent = statusText;
+    },
+    finish() {
+      const bar = document.getElementById('batch-progress');
+      if (bar) bar.style.width = '100%';
+      const percentEl = document.getElementById('batch-percent');
+      if (percentEl) percentEl.textContent = '100%';
+    }
+  };
+}
+
+/**
+ * Handle merge mode: combine all image files into a single PDF
+ * using the imagesToPdf handler directly.
+ */
+async function handleMergeConvert() {
+  const imageFiles = batchFiles.filter(bf => isImageType(bf.file.type));
+  if (imageFiles.length < 2) {
+    return alert("Need at least 2 image files to merge.");
+  }
+
+  const progress = buildProgressPopup(`Merging ${imageFiles.length} images into PDF...`);
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  try {
+    const mergeHandler = handlers.find(h => h.name === "imagesToPdf");
+    if (!mergeHandler) throw "imagesToPdf handler not found.";
+
+    if (!mergeHandler.ready) await mergeHandler.init();
+
+    progress.updateProgress(1, 4, 'Reading image files...');
+
+    const inputFileData: FileData[] = [];
+    for (let i = 0; i < imageFiles.length; i++) {
+      if (conversionCancelled) {
+        window.showPopup(
+          `<h2>Merge cancelled</h2>` +
+          `<p>Stopped before completing.</p>` +
+          `<button onclick="window.hidePopup()">OK</button>`
+        );
+        return;
+      }
+      const buf = await imageFiles[i].file.arrayBuffer();
+      inputFileData.push({ name: imageFiles[i].file.name, bytes: new Uint8Array(buf) });
+      progress.updateProgress(i + 1, imageFiles.length + 2, `Reading: ${imageFiles[i].file.name}`);
+    }
+
+    const firstMime = normalizeMimeType(imageFiles[0].file.type);
+    const inputFormat = mergeHandler.supportedFormats!.find(f => f.mime === firstMime && f.from);
+    const outputFormat = mergeHandler.supportedFormats!.find(f => f.internal === "pdf" && f.to);
+
+    if (!inputFormat || !outputFormat) {
+      throw "Could not find matching format for merge.";
+    }
+
+    progress.updateProgress(imageFiles.length, imageFiles.length + 2, 'Building PDF...');
+
+    if (conversionCancelled) {
+      window.showPopup(
+        `<h2>Merge cancelled</h2>` +
+        `<p>Stopped before completing.</p>` +
+        `<button onclick="window.hidePopup()">OK</button>`
+      );
+      return;
+    }
+
+    const result = await mergeHandler.doConvert(inputFileData, inputFormat, outputFormat);
+
+    progress.finish();
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    for (const file of result) {
+      downloadFile(file.bytes, file.name, "application/pdf");
+    }
+
+    window.showPopup(
+      `<h2>Merged ${imageFiles.length} images into PDF!</h2>` +
+      `<p>Output: <b>${result[0]?.name || 'merged.pdf'}</b></p>\n` +
+      `<button onclick="window.hidePopup()">OK</button>`
+    );
+
+  } catch (e) {
+    window.hidePopup();
+    alert("Merge failed: " + e);
+    console.error(e);
+  }
 }
 
 ui.convertButton.onclick = async function () {
 
-  const inputFiles = selectedFiles;
+  if (batchFiles.length === 0) {
+    return alert("Select input file(s).");
+  }
 
-  if (inputFiles.length === 0) {
-    return alert("Select an input file.");
+  // Handle merge mode
+  if (mergeMode) {
+    return handleMergeConvert();
   }
 
   const inputButton = document.querySelector("#from-list .selected");
   if (!inputButton) return alert("Specify input file format.");
 
-  const outputButton = document.querySelector("#to-list .selected");
-  if (!outputButton) return alert("Specify output file format.");
-
   const inputOption = allOptions[Number(inputButton.getAttribute("format-index"))];
-  const outputOption = allOptions[Number(outputButton.getAttribute("format-index"))];
 
-  const inputFormat = inputOption.format;
-  const outputFormat = outputOption.format;
+  // Resolve global output (may be null if per-file overrides are used)
+  const globalOutputButton = document.querySelector("#to-list .selected");
+  const globalOutputOption = globalOutputButton
+    ? allOptions[Number(globalOutputButton.getAttribute("format-index"))]
+    : null;
 
   try {
 
-    const inputFileData = [];
-    for (const inputFile of inputFiles) {
-      const inputBuffer = await inputFile.arrayBuffer();
-      const inputBytes = new Uint8Array(inputBuffer);
-      if (inputFormat.mime === outputFormat.mime) {
-        downloadFile(inputBytes, inputFile.name, inputFormat.mime);
-        continue;
-      }
-      inputFileData.push({ name: inputFile.name, bytes: inputBytes });
-    }
+    const totalFiles = batchFiles.length;
+    let completedFiles = 0;
+    let failedFiles = 0;
 
-    window.showPopup("<h2>Finding conversion route...</h2>");
-    // Delay for a bit to give the browser time to render
+    const progress = buildProgressPopup(
+      `Converting ${totalFiles} file${totalFiles > 1 ? 's' : ''}...`
+    );
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-    const output = await tryConvertByTraversing(inputFileData, inputOption, outputOption);
-    if (!output) {
-      window.hidePopup();
-      alert("Failed to find conversion route.");
+    const allOutputFiles: { name: string; bytes: Uint8Array; mime: string }[] = [];
+
+    for (const bf of batchFiles) {
+      // Check for cancellation
+      if (conversionCancelled) break;
+
+      const inputFile = bf.file;
+
+      // Resolve this file's output format: per-file override takes priority
+      const fileOutputOption = bf.outputFormatIndex !== null
+        ? allOptions[bf.outputFormatIndex]
+        : globalOutputOption;
+
+      if (!fileOutputOption) {
+        console.warn(`No output format for ${inputFile.name}, skipping.`);
+        failedFiles++;
+        completedFiles++;
+        progress.updateProgress(completedFiles, totalFiles, `Skipped: ${inputFile.name} (no format)`);
+        continue;
+      }
+
+      const outputFormat = fileOutputOption.format;
+      const arrow = bf.outputFormatIndex !== null ? ` \u2192 ${outputFormat.format.toUpperCase()}` : '';
+      progress.updateProgress(completedFiles, totalFiles, `Processing: ${inputFile.name}${arrow}`);
+
+      const inputBuffer = await inputFile.arrayBuffer();
+      const inputBytes = new Uint8Array(inputBuffer);
+
+      if (inputOption.format.mime === outputFormat.mime) {
+        downloadFile(inputBytes, inputFile.name, inputOption.format.mime);
+        completedFiles++;
+        progress.updateProgress(completedFiles, totalFiles, `Done: ${inputFile.name}`);
+        continue;
+      }
+
+      const inputFileData: FileData[] = [{ name: inputFile.name, bytes: inputBytes }];
+
+      const output = await tryConvertByTraversing(inputFileData, inputOption, fileOutputOption);
+      if (!output) {
+        console.warn(`Failed to convert ${inputFile.name}, skipping.`);
+        failedFiles++;
+        completedFiles++;
+        progress.updateProgress(completedFiles, totalFiles, `Failed: ${inputFile.name}`);
+        continue;
+      }
+
+      // Build proper output filename from original name + output extension
+      const outputExt = outputFormat.extension || outputFormat.format;
+      for (let fi = 0; fi < output.files.length; fi++) {
+        const outName = output.files.length === 1
+          ? buildOutputFilename(inputFile.name, outputExt)
+          : buildOutputFilename(inputFile.name, outputExt).replace(/\.([^.]+)$/, `_${fi + 1}.$1`);
+        allOutputFiles.push({ name: outName, bytes: output.files[fi].bytes, mime: outputFormat.mime });
+      }
+
+      completedFiles++;
+      progress.updateProgress(completedFiles, totalFiles, `Done: ${inputFile.name}`);
+    }
+
+    // Handle cancellation
+    if (conversionCancelled) {
+      // Still download whatever was completed
+      for (const file of allOutputFiles) {
+        downloadFile(file.bytes, file.name, file.mime);
+      }
+      window.showPopup(
+        `<h2>Conversion cancelled</h2>` +
+        `<p>Completed ${completedFiles} of ${totalFiles} files before cancelling.</p>` +
+        (allOutputFiles.length > 0 ? `<p>${allOutputFiles.length} file(s) downloaded.</p>` : '') +
+        `<button onclick="window.hidePopup()">OK</button>`
+      );
       return;
     }
 
-    for (const file of output.files) {
-      downloadFile(file.bytes, file.name, outputFormat.mime);
+    progress.finish();
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Download all output files
+    for (const file of allOutputFiles) {
+      downloadFile(file.bytes, file.name, file.mime);
     }
 
+    const outLabel = globalOutputOption
+      ? `${inputOption.format.format.toUpperCase()} \u2192 ${globalOutputOption.format.format.toUpperCase()}`
+      : `${inputOption.format.format.toUpperCase()} \u2192 per-file formats`;
     window.showPopup(
-      `<h2>Converted ${inputOption.format.format} to ${outputOption.format.format}!</h2>` +
-      `<p>Path used: <b>${output.path.map(c => c.format.format).join(" → ")}</b>.</p>\n` +
+      `<h2>Converted ${allOutputFiles.length} file${allOutputFiles.length !== 1 ? 's' : ''}!</h2>` +
+      `<p>${outLabel}</p>` +
+      (failedFiles > 0 ? `<p style="color: var(--accent-red);">${failedFiles} file(s) failed</p>` : '') +
       `<button onclick="window.hidePopup()">OK</button>`
     );
 
