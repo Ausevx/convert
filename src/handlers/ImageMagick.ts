@@ -19,9 +19,9 @@ class ImageMagickHandler implements FormatHandler {
 
   public ready: boolean = false;
 
-  async init () {
+  async init() {
 
-    const wasmLocation = "/convert/wasm/magick.wasm";
+    const wasmLocation = "wasm/magick.wasm";
     const wasmBytes = await fetch(wasmLocation).then(r => r.bytes());
 
     await initializeImageMagick(wasmBytes);
@@ -64,7 +64,7 @@ class ImageMagickHandler implements FormatHandler {
     this.ready = true;
   }
 
-  async doConvert (
+  async doConvert(
     inputFiles: FileData[],
     inputFormat: FileFormat,
     outputFormat: FileFormat
@@ -80,11 +80,11 @@ class ImageMagickHandler implements FormatHandler {
     const bytes: Uint8Array = await new Promise(resolve => {
       MagickImageCollection.use(outputCollection => {
         for (const inputFile of inputFiles) {
-           if (inputFormat.format == "rgb") {
-             // Guess how big the Image should be
-             inputSettings.width = Math.sqrt(inputFile.bytes.length / 3);
-             inputSettings.height = inputSettings.width;
-           }
+          if (inputFormat.format == "rgb") {
+            // Guess how big the Image should be
+            inputSettings.width = Math.sqrt(inputFile.bytes.length / 3);
+            inputSettings.height = inputSettings.width;
+          }
           MagickImageCollection.use(fileCollection => {
             fileCollection.read(inputFile.bytes, inputSettings);
             while (fileCollection.length > 0) {
