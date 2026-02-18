@@ -58,10 +58,7 @@ try { handlers.push(new flptojsonHandler()) } catch (_) { };
 try { handlers.push(new floHandler()) } catch (_) { };
 try { handlers.push(new batToExeHandler()) } catch (_) { };
 try { handlers.push(new textEncodingHandler()) } catch (_) { };
-<<<<<<< master
 try { handlers.push(new lzhHandler()) } catch (_) { };
-=======
 try { handlers.push(new pandocHandler()) } catch (_) { };
->>>>>>> master
 
 export default handlers;
