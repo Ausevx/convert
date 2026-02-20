@@ -3,7 +3,6 @@ import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
 // ═══════ Core (lightweight) handlers — eagerly imported ═══════
 import canvasToBlobHandler from "./canvasToBlob.ts";
 import htmlEmbedHandler from "./htmlEmbed.ts";
-import pdftoimgHandler from "./pdftoimg.ts";
 import { renameZipHandler, renameTxtHandler } from "./rename.ts";
 import envelopeHandler from "./envelope.ts";
 import svgForeignObjectHandler from "./svgForeignObject.ts";
@@ -74,7 +73,7 @@ const handlers: FormatHandler[] = [];
 // Core handlers (eagerly loaded — small bundles)
 try { handlers.push(new canvasToBlobHandler()) } catch (_) { };
 try { handlers.push(new htmlEmbedHandler()) } catch (_) { };
-try { handlers.push(new pdftoimgHandler()) } catch (_) { };
+try { handlers.push(renameZipHandler) } catch (_) { };
 try { handlers.push(renameZipHandler) } catch (_) { };
 try { handlers.push(renameTxtHandler) } catch (_) { };
 try { handlers.push(new envelopeHandler()) } catch (_) { };
@@ -106,6 +105,7 @@ handlers.push(new LazyHandler("petozip", () => import("./petozip.ts")));
 handlers.push(new LazyHandler("flptojson", () => import("./flptojson.ts")));
 handlers.push(new LazyHandler("flo", () => import("./flo.ts")));
 handlers.push(new LazyHandler("libopenmpt", () => import("./libopenmpt.ts")));
+handlers.push(new LazyHandler("pdftoimg", () => import("./pdftoimg.ts")));
 handlers.push(new LazyHandler("lzh", () => import("./lzh.ts")));
 
 export default handlers;

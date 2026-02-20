@@ -85,6 +85,12 @@ class FFmpegHandler implements FormatHandler {
     this.#ffmpeg = new FFmpeg();
     await this.loadFFmpeg();
 
+    if (window.supportedFormatCache.has(this.name)) {
+      this.supportedFormats = window.supportedFormatCache.get(this.name)!;
+      this.ready = true;
+      return;
+    }
+
     const getMuxerDetails = async (muxer: string) => {
 
       const stdout = await this.getStdout(async () => {

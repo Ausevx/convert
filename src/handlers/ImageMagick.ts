@@ -26,6 +26,12 @@ class ImageMagickHandler implements FormatHandler {
 
     await initializeImageMagick(wasmBytes);
 
+    if (window.supportedFormatCache.has(this.name)) {
+      this.supportedFormats = window.supportedFormatCache.get(this.name)!;
+      this.ready = true;
+      return;
+    }
+
     Magick.supportedFormats.forEach(format => {
       const formatName = format.format.toLowerCase();
       if (formatName === "apng") return;

@@ -158,10 +158,16 @@ class pandocHandler implements FormatHandler {
     warnings: any;
   }>;
 
-  async init () {
+  async init() {
     const { query, convert } = await import("./pandoc/pandoc.js");
     this.query = query;
     this.convert = convert;
+
+    if (window.supportedFormatCache.has(this.name)) {
+      this.supportedFormats = window.supportedFormatCache.get(this.name)!;
+      this.ready = true;
+      return;
+    }
 
     const inputFormats: string[] = await query({ query: "input-formats" });
     const outputFormats: string[] = await query({ query: "output-formats" });
@@ -201,7 +207,7 @@ class pandocHandler implements FormatHandler {
     this.ready = true;
   }
 
-  async doConvert (
+  async doConvert(
     inputFiles: FileData[],
     inputFormat: FileFormat,
     outputFormat: FileFormat
