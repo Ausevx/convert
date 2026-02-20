@@ -769,7 +769,129 @@ button.selected {
   box-shadow: 0 2px 8px var(--highlight-glow);
 }
 
-/* ═══════════ CONVERT BUTTON ═══════════ */
+/* ═══════════ CONVERSION OPTIONS BAR ═══════════ */
+#convert-options {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+  padding: 16px clamp(20px, 5vw, 48px);
+  padding-bottom: 80px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  animation: slideDown 0.3s ease both;
+}
+
+.convert-option-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.option-label svg {
+  color: var(--highlight-color);
+  flex-shrink: 0;
+}
+
+/* Segmented control (quality buttons) */
+.segmented-control {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.seg-btn {
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.seg-btn:not(:last-child) {
+  border-right: 1px solid var(--border-color);
+}
+
+.seg-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.seg-btn.active {
+  background: var(--highlight-color);
+  color: white;
+  font-weight: 600;
+}
+
+.option-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+/* Zip toggle label */
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-fast);
+  background: var(--bg-card);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  font-weight: 500;
+}
+
+.toggle-label:hover {
+  border-color: var(--highlight-color);
+  color: var(--text-primary);
+  background: var(--highlight-subtle);
+}
+
+.toggle-label input[type="checkbox"] {
+  accent-color: var(--highlight-color);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.toggle-label svg {
+  color: var(--highlight-color);
+  flex-shrink: 0;
+}
+
+
 #convert-button {
   position: fixed;
   left: 50%;
@@ -1008,7 +1130,7 @@ button.selected {
   }
 
   .format-container:last-child {
-    padding-bottom: 100px;
+    padding-bottom: 24px;
   }
 
   .format-divider {
@@ -1025,7 +1147,10 @@ button.selected {
 
   .format-list {
     max-width: 100%;
-    max-height: none;
+    max-height: 40vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .search {
@@ -1043,6 +1168,19 @@ button.selected {
 
   #to-container {
     border-top: 1px solid var(--border-color);
+  }
+
+  /* Options bar responsive */
+  #convert-options {
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px clamp(16px, 5vw, 40px);
+    padding-bottom: 80px;
+  }
+
+  .convert-option-group {
+    justify-content: center;
+    width: 100%;
   }
 }
 
@@ -1172,6 +1310,7 @@ button.selected {
 
   .format-list {
     padding: 6px;
+    max-height: 35vh;
   }
 
   .format-list button {
@@ -1205,6 +1344,25 @@ button.selected {
     width: 34px;
     height: 34px;
     padding: 6px;
+  }
+
+  /* Mobile options bar */
+  .seg-btn {
+    font-size: 0.68rem;
+    padding: 6px 10px;
+  }
+
+  .option-label {
+    font-size: 0.72rem;
+  }
+
+  .option-hint {
+    font-size: 0.65rem;
+  }
+
+  .toggle-label {
+    font-size: 0.72rem;
+    padding: 6px 10px;
   }
 }
 
@@ -1274,4 +1432,31 @@ html {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
   }
+}
+
+/* ═══════════ POPULAR FORMAT DIVIDER ═══════════ */
+.popular-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  margin: 2px 0;
+  pointer-events: none;
+}
+
+.popular-divider::before,
+.popular-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.popular-divider span {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }

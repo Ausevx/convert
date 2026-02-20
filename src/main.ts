@@ -2,6 +2,8 @@ import type { FileFormat, FileData, FormatHandler, ConvertPathNode } from "./For
 import normalizeMimeType from "./normalizeMimeType.js";
 import handlers from "./handlers";
 import { TraversionGraph } from "./TraversionGraph.js";
+import { PDF_QUALITY_PRESETS, setPdfQualityPreset } from "./handlers/pdftoimg.js";
+import JSZip from "jszip";
 
 /** A single file in the batch with optional per-file output override */
 interface BatchFile {
@@ -50,6 +52,12 @@ const ui = {
   mergeToggle: document.querySelector("#merge-toggle") as HTMLInputElement,
   mergeLabel: document.querySelector("#merge-label") as HTMLLabelElement,
   outputModeToggle: document.querySelector("#output-mode-toggle") as HTMLDivElement,
+  convertOptions: document.querySelector("#convert-options") as HTMLDivElement,
+  pdfQualitySection: document.querySelector("#pdf-quality-section") as HTMLDivElement,
+  pdfQualityButtons: document.querySelector("#pdf-quality-buttons") as HTMLDivElement,
+  pdfQualityEstimate: document.querySelector("#pdf-quality-estimate") as HTMLSpanElement,
+  zipSection: document.querySelector("#zip-section") as HTMLDivElement,
+  zipToggle: document.querySelector("#zip-toggle") as HTMLInputElement,
 };
 
 /**
@@ -311,12 +319,14 @@ function openPerFileFormatPicker(fileIdx: number) {
 function updateConvertButtonState() {
   if (batchFiles.length === 0) {
     ui.convertButton.className = 'disabled';
+    updateOptionsBarVisibility();
     return;
   }
 
   if (mergeMode && batchFiles.length >= 2) {
     const outputSelected = document.querySelector("#to-list .selected");
     ui.convertButton.className = outputSelected ? '' : 'disabled';
+    updateOptionsBarVisibility();
     return;
   }
 
@@ -324,6 +334,7 @@ function updateConvertButtonState() {
   const inputSelected = document.querySelector("#from-list .selected");
   if (!inputSelected) {
     ui.convertButton.className = 'disabled';
+    updateOptionsBarVisibility();
     return;
   }
 
@@ -336,6 +347,42 @@ function updateConvertButtonState() {
     const globalOutputSelected = document.querySelector("#to-list .selected");
     ui.convertButton.className = globalOutputSelected ? '' : 'disabled';
   }
+  updateOptionsBarVisibility();
+}
+
+/** Show/hide the conversion options bar based on current format selections */
+function updateOptionsBarVisibility() {
+  const inputBtn = document.querySelector("#from-list .selected");
+  const outputBtn = document.querySelector("#to-list .selected");
+
+  let showPdfQuality = false;
+  let showZip = false;
+  let anyVisible = false;
+
+  if (inputBtn && outputBtn) {
+    const inputIdx = Number(inputBtn.getAttribute("format-index"));
+    const outputIdx = Number(outputBtn.getAttribute("format-index"));
+    const inputFormat = allOptions[inputIdx]?.format;
+    const outputFormat = allOptions[outputIdx]?.format;
+
+    // Show PDF quality when input is PDF and output is an image format
+    if (inputFormat && outputFormat) {
+      const inputIsPdf = inputFormat.mime === 'application/pdf' || inputFormat.format === 'pdf';
+      const outputIsImage = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif', 'tiff'].includes(outputFormat.format.toLowerCase());
+      showPdfQuality = inputIsPdf && outputIsImage;
+    }
+
+    // Show ZIP option when there are multiple files, or when PDF→image (multi-page output)
+    if (batchFiles.length >= 2 || showPdfQuality) {
+      showZip = true;
+    }
+  }
+
+  anyVisible = showPdfQuality || showZip;
+
+  ui.convertOptions.style.display = anyVisible ? 'flex' : 'none';
+  ui.pdfQualitySection.style.display = showPdfQuality ? 'flex' : 'none';
+  ui.zipSection.style.display = showZip ? 'flex' : 'none';
 }
 
 /**
@@ -499,6 +546,54 @@ window.printSupportedFormatCache = () => {
   return JSON.stringify(entries, null, 2);
 }
 
+/** Formats to prioritize at the top of format lists */
+const popularFormats = ['pdf', 'png', 'jpeg', 'jpg', 'mp4', 'mp3', 'svg', 'gif', 'webp', 'docx', 'wav', 'html'];
+
+/** Re-order buttons in a format list so popular formats appear first, with a divider */
+function sortPopularFormatsToTop(list: HTMLDivElement) {
+  const buttons = Array.from(list.querySelectorAll('button')) as HTMLButtonElement[];
+  if (buttons.length === 0) return;
+
+  const popular: HTMLButtonElement[] = [];
+  const rest: HTMLButtonElement[] = [];
+
+  for (const btn of buttons) {
+    const formatIdx = btn.getAttribute('format-index');
+    if (formatIdx !== null) {
+      const opt = allOptions[parseInt(formatIdx)];
+      const fmt = opt?.format?.format?.toLowerCase() || '';
+      if (popularFormats.includes(fmt)) {
+        popular.push(btn);
+      } else {
+        rest.push(btn);
+      }
+    } else {
+      rest.push(btn);
+    }
+  }
+
+  // Sort popular buttons by their priority in the popularFormats array
+  popular.sort((a, b) => {
+    const aFmt = allOptions[parseInt(a.getAttribute('format-index') || '0')]?.format?.format?.toLowerCase() || '';
+    const bFmt = allOptions[parseInt(b.getAttribute('format-index') || '0')]?.format?.format?.toLowerCase() || '';
+    return popularFormats.indexOf(aFmt) - popularFormats.indexOf(bFmt);
+  });
+
+  // Only add divider if we have both popular and other formats
+  if (popular.length > 0 && rest.length > 0) {
+    // Clear and re-append in new order
+    list.innerHTML = '';
+    for (const btn of popular) list.appendChild(btn);
+
+    const divider = document.createElement('div');
+    divider.className = 'popular-divider';
+    divider.innerHTML = '<span>All formats</span>';
+    list.appendChild(divider);
+
+    for (const btn of rest) list.appendChild(btn);
+  }
+}
+
 
 async function buildOptionList() {
 
@@ -581,6 +676,11 @@ async function buildOptionList() {
 
     }
   }
+
+  // Sort popular formats to top of each list
+  sortPopularFormatsToTop(ui.inputList);
+  sortPopularFormatsToTop(ui.outputList);
+
   window.traversionGraph.init();
   filterButtonList(ui.inputList, ui.inputSearch.value);
   filterButtonList(ui.outputList, ui.outputSearch.value);
@@ -603,6 +703,20 @@ async function buildOptionList() {
     console.log("Built initial format list.");
   }
 })();
+
+// ═══════ PDF Quality Selector ═══════
+for (const btn of Array.from(ui.pdfQualityButtons.querySelectorAll('.seg-btn'))) {
+  (btn as HTMLButtonElement).onclick = () => {
+    const idx = Number((btn as HTMLElement).getAttribute('data-quality'));
+    setPdfQualityPreset(idx);
+    // Update active state
+    for (const b of Array.from(ui.pdfQualityButtons.querySelectorAll('.seg-btn'))) {
+      b.classList.toggle('active', b === btn);
+    }
+    // Update estimate label
+    ui.pdfQualityEstimate.textContent = PDF_QUALITY_PRESETS[idx].estimateKb;
+  };
+}
 
 ui.modeToggleButton.addEventListener("click", () => {
   simpleMode = !simpleMode;
@@ -943,17 +1057,31 @@ ui.convertButton.onclick = async function () {
     progress.finish();
     await new Promise(resolve => setTimeout(resolve, 200));
 
-    // Download all output files
-    for (const file of allOutputFiles) {
-      downloadFile(file.bytes, file.name, file.mime);
+    // Download all output files — optionally as ZIP
+    const useZip = ui.zipToggle.checked && allOutputFiles.length >= 2;
+    if (useZip) {
+      progress.updateProgress(completedFiles, totalFiles, 'Zipping files...');
+      const zip = new JSZip();
+      for (const file of allOutputFiles) {
+        zip.file(file.name, file.bytes);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'uint8array' });
+      const firstBaseName = batchFiles[0]?.file.name.replace(/\.[^.]+$/, '') || 'converted';
+      downloadFile(zipBlob, `${firstBaseName}_converted.zip`, 'application/zip');
+    } else {
+      for (const file of allOutputFiles) {
+        downloadFile(file.bytes, file.name, file.mime);
+      }
     }
 
     const outLabel = globalOutputOption
       ? `${inputOption.format.format.toUpperCase()} \u2192 ${globalOutputOption.format.format.toUpperCase()}`
       : `${inputOption.format.format.toUpperCase()} \u2192 per-file formats`;
+    const zipNote = useZip ? `<p>\ud83d\udce6 Bundled into a single ZIP archive</p>` : '';
     window.showPopup(
       `<h2>Converted ${allOutputFiles.length} file${allOutputFiles.length !== 1 ? 's' : ''}!</h2>` +
       `<p>${outLabel}</p>` +
+      zipNote +
       (failedFiles > 0 ? `<p style="color: var(--accent-red);">${failedFiles} file(s) failed</p>` : '') +
       `<button onclick="window.hidePopup()">OK</button>`
     );

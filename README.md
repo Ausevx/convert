@@ -19,6 +19,9 @@ This fork adds several new capabilities:
 - **Progress Bar with Cancel** — A shimmer-animated progress bar shows real-time completion percentage and current file status during conversion. A Cancel button lets you abort mid-conversion while keeping already-converted files
 - **Chrome Download Fix** — Output files now have proper names (e.g., `photo.png` instead of UUIDs) and download correctly on Chrome
 - **Dark Theme UI** — Modern dark interface with improved typography, responsive layout, and mobile-optimized bottom sheets
+- **PDF Quality Selector** — Choose Low/Medium/High/Max quality presets when converting PDF to images, with estimated output sizes
+- **ZIP Download** — Bundle multiple output files into a single ZIP archive
+- **Mobile UX** — Popular formats (PDF, PNG, JPEG…) pinned to the top of format lists with capped scroll height for smoother navigation
 
 ## Usage
 
