@@ -100,16 +100,17 @@
 
   </div>
 
-  <!-- ═══════ CONVERSION OPTIONS BAR ═══════ -->
-  <div id="convert-options" style="display: none;">
-    <!-- PDF Quality Selector -->
-    <div id="pdf-quality-section" class="convert-option-group" style="display: none;">
-      <div class="option-label">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
+  <!-- ═══════ Output Quality Bar (visible when PDF→image selected) ═══════ -->
+  <div id="quality-bar" style="display: none;">
+    <div class="quality-bar-inner">
+      <div class="quality-bar-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
         </svg>
-        PDF Quality
+        Output Quality
       </div>
       <div id="pdf-quality-buttons" class="segmented-control">
         <button class="seg-btn" data-quality="0">Low</button>
@@ -117,17 +118,20 @@
         <button class="seg-btn active" data-quality="2">High</button>
         <button class="seg-btn" data-quality="3">Max</button>
       </div>
-      <span id="pdf-quality-estimate" class="option-hint">~600 KB/page</span>
+      <span id="pdf-quality-estimate" class="quality-bar-hint">~600 KB/page</span>
     </div>
+  </div>
 
-    <!-- Zip Download Toggle -->
+  <!-- ═══════ CONVERSION OPTIONS BAR (ZIP only) ═══════ -->
+  <div id="convert-options" style="display: none;">
     <div id="zip-section" class="convert-option-group" style="display: none;">
       <label id="zip-label" class="toggle-label">
         <input type="checkbox" id="zip-toggle">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
         Download as ZIP
       </label>

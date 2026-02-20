@@ -53,7 +53,7 @@ const ui = {
   mergeLabel: document.querySelector("#merge-label") as HTMLLabelElement,
   outputModeToggle: document.querySelector("#output-mode-toggle") as HTMLDivElement,
   convertOptions: document.querySelector("#convert-options") as HTMLDivElement,
-  pdfQualitySection: document.querySelector("#pdf-quality-section") as HTMLDivElement,
+  qualityBar: document.querySelector("#quality-bar") as HTMLDivElement,
   pdfQualityButtons: document.querySelector("#pdf-quality-buttons") as HTMLDivElement,
   pdfQualityEstimate: document.querySelector("#pdf-quality-estimate") as HTMLSpanElement,
   zipSection: document.querySelector("#zip-section") as HTMLDivElement,
@@ -355,9 +355,8 @@ function updateOptionsBarVisibility() {
   const inputBtn = document.querySelector("#from-list .selected");
   const outputBtn = document.querySelector("#to-list .selected");
 
-  let showPdfQuality = false;
+  let showQuality = false;
   let showZip = false;
-  let anyVisible = false;
 
   if (inputBtn && outputBtn) {
     const inputIdx = Number(inputBtn.getAttribute("format-index"));
@@ -365,24 +364,65 @@ function updateOptionsBarVisibility() {
     const inputFormat = allOptions[inputIdx]?.format;
     const outputFormat = allOptions[outputIdx]?.format;
 
-    // Show PDF quality when input is PDF and output is an image format
+    // Show quality bar when input is PDF and output is an image format
     if (inputFormat && outputFormat) {
       const inputIsPdf = inputFormat.mime === 'application/pdf' || inputFormat.format === 'pdf';
       const outputIsImage = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif', 'tiff'].includes(outputFormat.format.toLowerCase());
-      showPdfQuality = inputIsPdf && outputIsImage;
+      showQuality = inputIsPdf && outputIsImage;
     }
 
     // Show ZIP option when there are multiple files, or when PDF→image (multi-page output)
-    if (batchFiles.length >= 2 || showPdfQuality) {
+    if (batchFiles.length >= 2 || showQuality) {
       showZip = true;
     }
   }
 
-  anyVisible = showPdfQuality || showZip;
+  // Quality bar lives in `.format-divider`, not in `#convert-options`
+  ui.qualityBar.style.display = showQuality ? 'flex' : 'none';
 
-  ui.convertOptions.style.display = anyVisible ? 'flex' : 'none';
-  ui.pdfQualitySection.style.display = showPdfQuality ? 'flex' : 'none';
+  // Update dynamic estimate when quality bar is shown
+  if (showQuality) updateDynamicEstimate();
+
+  // ZIP toggle lives in `#convert-options`
+  ui.convertOptions.style.display = showZip ? 'flex' : 'none';
   ui.zipSection.style.display = showZip ? 'flex' : 'none';
+}
+
+/** Dynamic size estimation based on actual uploaded file */
+function updateDynamicEstimate() {
+  const preset = PDF_QUALITY_PRESETS[getCurrentQualityIndex()];
+
+  if (batchFiles.length === 0) {
+    ui.pdfQualityEstimate.textContent = preset.estimateKb;
+    return;
+  }
+
+  // Sum file sizes for all uploaded PDFs
+  const totalBytes = batchFiles.reduce((sum, bf) => sum + bf.file.size, 0);
+  // Rough page count: PDF overhead ~30KB/page for text-heavy, ~200KB/page for images
+  // Use a midpoint heuristic: every ~50KB of PDF data ≈ 1 page
+  const estimatedPages = Math.max(1, Math.round(totalBytes / 50_000));
+
+  // Base output size per page scales quadratically with scale factor
+  // Baseline: at scale=1 (72 DPI), a typical A4 image ≈ 80KB JPEG
+  const baseKbPerPage = 80;
+  const scaledKb = baseKbPerPage * preset.scale * preset.scale * preset.quality;
+  const totalKb = scaledKb * estimatedPages;
+
+  let sizeStr: string;
+  if (totalKb >= 1024) {
+    sizeStr = `~${(totalKb / 1024).toFixed(1)} MB`;
+  } else {
+    sizeStr = `~${Math.round(totalKb)} KB`;
+  }
+
+  const pageLabel = estimatedPages === 1 ? 'page' : 'pages';
+  ui.pdfQualityEstimate.textContent = `${sizeStr} total · ~${estimatedPages} ${pageLabel}`;
+}
+
+function getCurrentQualityIndex(): number {
+  const activeBtn = ui.pdfQualityButtons.querySelector('.seg-btn.active');
+  return activeBtn ? Number((activeBtn as HTMLElement).getAttribute('data-quality')) : 2;
 }
 
 /**
@@ -704,7 +744,7 @@ async function buildOptionList() {
   }
 })();
 
-// ═══════ PDF Quality Selector ═══════
+// ═══════ Output Quality Selector ═══════
 for (const btn of Array.from(ui.pdfQualityButtons.querySelectorAll('.seg-btn'))) {
   (btn as HTMLButtonElement).onclick = () => {
     const idx = Number((btn as HTMLElement).getAttribute('data-quality'));
@@ -713,8 +753,8 @@ for (const btn of Array.from(ui.pdfQualityButtons.querySelectorAll('.seg-btn')))
     for (const b of Array.from(ui.pdfQualityButtons.querySelectorAll('.seg-btn'))) {
       b.classList.toggle('active', b === btn);
     }
-    // Update estimate label
-    ui.pdfQualityEstimate.textContent = PDF_QUALITY_PRESETS[idx].estimateKb;
+    // Update estimate with dynamic calculation
+    updateDynamicEstimate();
   };
 }
 
